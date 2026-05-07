@@ -35,10 +35,12 @@ export const cChainParams = reactive({
         BIP44_TYPE_LEDGER: 77,
         PROTOCOL_VERSION: 70030,
         MASTERNODE_PORT: 8788,
+        blockExplorer: 'https://explorer.mewccrypto.com',
         // A list of Labs-trusted explorers
         Explorers: [
-            // Display name      Blockbook-compatible API base
-            { name: 'MEWC BlockBook', url: 'https://blockbook.mewccrypto.com' },
+            { name: 'MEWC Electrs 1', url: 'https://electrs.mewccrypto.com' },
+            { name: 'MEWC Electrs 2', url: 'https://electrs2.mewccrypto.com' },
+            { name: 'MEWC Electrs 3', url: 'https://electrs3.meowcoin.org' },
         ],
         Nodes: [
 	    { name: 'MEWC Node 1', url: 'seed-mainnet-mewc.meowcoin.cc' },
@@ -71,10 +73,12 @@ export const cChainParams = reactive({
         BIP44_TYPE_LEDGER: 1,
         PROTOCOL_VERSION: 70030,
         MASTERNODE_PORT: 4969,
+        blockExplorer: 'https://explorer.mewccrypto.com',
         // A list of Labs-trusted explorers
         Explorers: [
-            // Display name      Blockbook-compatible API base
-            { name: 'MEWC Blockbook', url: 'https://blockbook.mewccrypto.com' },
+            { name: 'MEWC Electrs 1', url: 'https://electrs.mewccrypto.com' },
+            { name: 'MEWC Electrs 2', url: 'https://electrs2.mewccrypto.com' },
+            { name: 'MEWC Electrs 3', url: 'https://electrs3.meowcoin.org' },
         ],
         Nodes: [
 	    { name: 'MEWC TestNode1', url: 'seed-mainnet-mewc.meowcoin.cc' },

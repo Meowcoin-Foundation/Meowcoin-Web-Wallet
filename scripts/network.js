@@ -1,5 +1,8 @@
-import { cChainParams } from './chain_params.js';
-import { createAlert, sleep } from './misc.js';
+import { cChainParams, MAX_ACCOUNT_GAP } from './chain_params.js';
+
+/** Scan gap used during address discovery — larger than MAX_ACCOUNT_GAP to match BIP44 recommendation */
+const SCAN_GAP = 50;
+import { createAlert } from './misc.js';
 import { getEventEmitter } from './event_bus.js';
 import {
     STATS,
@@ -11,35 +14,6 @@ import {
 } from './settings.js';
 import { ALERTS, translation } from './i18n.js';
 import { mempool, stakingDashboard } from './global.js';
-
-/**
- * @typedef {Object} XPUBAddress
- * @property {string} type - Type of address (always 'XPUBAddress' for XPUBInfo classes)
- * @property {string} name - MEWC address string
- * @property {string} path - BIP44 path of the address derivation
- * @property {number} transfers - Number of transfers involving the address
- * @property {number} decimals - Decimal places in the amounts (MEWC has 8 decimals)
- * @property {string} balance - Current balance of the address (satoshi)
- * @property {string} totalReceived - Total ever received by the address (satoshi)
- * @property {string} totalSent - Total ever sent from the address (satoshi)
- */
-
-/**
- * @typedef {Object} XPUBInfo
- * @property {number} page - Current response page in a paginated data
- * @property {number} totalPages - Total pages in the paginated data
- * @property {number} itemsOnPage - Number of items on the current page
- * @property {string} address - XPUB string of the address
- * @property {string} balance - Current balance of the xpub (satoshi)
- * @property {string} totalReceived - Total ever received by the xpub (satoshi)
- * @property {string} totalSent - Total ever sent from the xpub (satoshi)
- * @property {string} unconfirmedBalance - Unconfirmed balance of the xpub (satoshi)
- * @property {number} unconfirmedTxs - Number of unconfirmed transactions of the xpub
- * @property {number} txs - Total number of transactions of the xpub
- * @property {string[]?} txids - Transaction ids involving the xpub
- * @property {number?} usedTokens - Number of used token addresses from the xpub
- * @property {XPUBAddress[]?} tokens - Array of used token addresses
- */
 
 /**
  * Virtual class rapresenting any network backend
@@ -121,9 +95,9 @@ export class Network {
 /**
  *
  */
-export class ExplorerNetwork extends Network {
+export class ElectrsNetwork extends Network {
     /**
-     * @param {string} strUrl - Url pointing to the blockbook explorer
+     * @param {string} strUrl - URL pointing to the electrs REST explorer
      */
     constructor(strUrl, wallet) {
         super(wallet);
@@ -158,16 +132,11 @@ export class ExplorerNetwork extends Network {
 
     async getBlockCount() {
         try {
-            const { backend } = await (
-                await retryWrapper(fetchBlockbook, `/api/v2/api`)
-            ).json();
-            if (backend.blocks > this.blocks) {
-                getEventEmitter().emit(
-                    'new-block',
-                    backend.blocks,
-                    this.blocks
-                );
-                this.blocks = backend.blocks;
+            const res = await retryWrapper(fetchElectrs, '/blocks/tip/height');
+            const blocks = parseInt(await res.text());
+            if (blocks > this.blocks) {
+                getEventEmitter().emit('new-block', blocks, this.blocks);
+                this.blocks = blocks;
                 if (this.fullSynced) {
                     await this.getLatestTxs(this.lastBlockSynced);
                     this.lastBlockSynced = this.blocks;
@@ -182,92 +151,68 @@ export class ExplorerNetwork extends Network {
         return this.blocks;
     }
 
-    /**
-     * Sometimes blockbook might return internal error, in this case this function will sleep for 20 seconds and retry
-     * @param {string} strCommand - The specific Blockbook api to call
-     * @returns {Promise<Object>} Explorer result in json
-     */
-    async safeFetchFromExplorer(strCommand) {
-        let trials = 0;
-        const maxTrials = 5;
-        while (trials < maxTrials) {
-            trials += 1;
-            const res = await fetchBlockbook(strCommand);
-            if (!res.ok) {
-                if (debug) {
-                    console.log(
-                        'Blockbook internal error! sleeping for 20 seconds'
-                    );
-                }
-                await sleep(20000);
-                continue;
-            }
-            return await res.json();
-        }
-        throw new Error('Cannot safe fetch from explorer!');
-    }
-    async getLatestTxs(nStartHeight) {
-        // Ask some blocks in the past or blockbock might not return a transaction that has just been mined
-        const blockOffset = 10;
-        nStartHeight =
-            nStartHeight > blockOffset
-                ? nStartHeight - blockOffset
-                : nStartHeight;
+    async getLatestTxs(_nStartHeight) {
+        if (!this.wallet || !this.wallet.isLoaded()) return;
         if (debug) {
             console.time('getLatestTxsTimer');
         }
-        // Form the API call using our wallet information
-        const strKey = this.wallet.getKeyToExport();
-        const strRoot = `/api/v2/${
-            this.wallet.isHD() ? 'xpub/' : 'address/'
-        }${strKey}`;
-        const strCoreParams = `?details=txs&from=${nStartHeight}`;
-        const probePage = !this.fullSynced
-            ? await this.safeFetchFromExplorer(
-                  `${strRoot + strCoreParams}&pageSize=1`
-              )
-            : null;
-        //.txs returns the total number of wallet's transaction regardless the startHeight and we use this for first sync
-        // after first sync (so at each new block) we can safely assume that user got less than 1000 new txs
-        //in this way we don't have to fetch the probePage after first sync
-        const txNumber = !this.fullSynced
-            ? probePage.txs - mempool.txmap.size
-            : 1;
-        // Compute the total pages and iterate through them until we've synced everything
-        const totalPages = Math.ceil(txNumber / 1000);
-        for (let i = totalPages; i > 0; i--) {
-            if (!this.fullSynced) {
-                getEventEmitter().emit(
-                    'sync-status-update',
-                    totalPages - i + 1,
-                    totalPages,
-                    false
-                );
+
+        const fetchAddressTxs = async (addr) => {
+            const first = await (await retryWrapper(fetchElectrs, `/address/${addr}/txs`)).json();
+            // electrs returns at most 25 confirmed txs per page; paginate if full
+            const confirmed = first.filter((tx) => tx.status.confirmed);
+            if (confirmed.length < 25) return first;
+            let all = [...first];
+            let lastTxid = confirmed.at(-1).txid;
+            while (true) {
+                const page = await (
+                    await retryWrapper(fetchElectrs, `/address/${addr}/txs/chain/${lastTxid}`)
+                ).json();
+                if (!page.length) break;
+                all = all.concat(page);
+                if (page.length < 25) break;
+                lastTxid = page.at(-1).txid;
             }
+            return all;
+        };
 
-            // Fetch this page of transactions
-            const iPage = await this.safeFetchFromExplorer(
-                `${strRoot + strCoreParams}&page=${i}`
-            );
-
-            // Update the internal mempool if there's new transactions
-            // Note: Extra check since Blockbook sucks and removes `.transactions` instead of an empty array if there's no transactions
-            if (iPage?.transactions?.length > 0) {
-                for (const tx of iPage.transactions.reverse()) {
-                    mempool.updateMempool(mempool.parseTransaction(tx));
+        if (!this.wallet.isHD()) {
+            const txs = await fetchAddressTxs(this.wallet.getKeyToExport());
+            for (const tx of txs) {
+                mempool.updateMempool(mempool.parseTransaction(tx));
+            }
+        } else {
+            for (const chain of [0, 1]) {
+                // Pre-load the first window so addresses are in #ownAddresses
+                this.wallet.loadAddresses(chain);
+                let gap = 0;
+                let index = 0;
+                while (gap < SCAN_GAP) {
+                    // Keep the loaded address window ahead of the scanner so
+                    // wallet.isMyVout() can recognise any address we discover
+                    if (index > 0 && index % MAX_ACCOUNT_GAP === 0) {
+                        this.wallet.loadAddresses(chain);
+                    }
+                    const addr = this.wallet.getAddress(chain, index);
+                    const txs = await fetchAddressTxs(addr);
+                    if (txs.length > 0) {
+                        gap = 0;
+                        for (const tx of txs) {
+                            mempool.updateMempool(mempool.parseTransaction(tx));
+                        }
+                    } else {
+                        gap++;
+                    }
+                    index++;
                 }
             }
-            await mempool.saveOnDisk();
         }
 
         mempool.setBalance();
+        await mempool.saveOnDisk();
+
         if (debug) {
-            console.log(
-                'Fetched latest txs: total number of pages was ',
-                totalPages,
-                ' fullSynced? ',
-                this.fullSynced
-            );
+            console.log('getLatestTxs done, fullSynced?', this.fullSynced);
             console.timeEnd('getLatestTxsTimer');
         }
     }
@@ -285,6 +230,7 @@ export class ExplorerNetwork extends Network {
         createAlert('success', translation.syncStatusFinished, 12500);
         getEventEmitter().emit('sync-status-update', 0, 0, true);
     }
+
     reset() {
         this.fullSynced = false;
         this.blocks = 0;
@@ -292,47 +238,77 @@ export class ExplorerNetwork extends Network {
     }
 
     /**
-     * @typedef {object} BlockbookUTXO
+     * @typedef {object} ElectrsUTXO
      * @property {string} txid - The TX hash of the output
-     * @property {number} vout - The Index Position of the output
-     * @property {string} value - The string-based satoshi value of the output
-     * @property {number} height - The block height the TX was confirmed in
+     * @property {number} vout - The index position of the output
+     * @property {number} value - The satoshi value of the output
      * @property {number} confirmations - The depth of the TX in the blockchain
      */
 
     /**
      * Fetch UTXOs from the current primary explorer
      * @param {string} strAddress - Optional address, gets UTXOs without changing MPW's state
-     * @returns {Promise<Array<BlockbookUTXO>>} Resolves when it has finished fetching UTXOs
+     * @returns {Promise<Array<ElectrsUTXO>>} Resolves when it has finished fetching UTXOs
      */
     async getUTXOs(strAddress = '') {
-        // If getUTXOs has been already called return
         if (this.utxoFetched && !strAddress) {
             return;
         }
-        // Don't fetch UTXOs if we're already scanning for them!
         if (!strAddress) {
             if (!this.wallet || !this.wallet.isLoaded()) return;
             if (this.isSyncing) return;
             this.isSyncing = true;
         }
         try {
-            let publicKey = strAddress || this.wallet.getKeyToExport();
-            // Fetch UTXOs for the key
-            const arrUTXOs = await (
-                await retryWrapper(fetchBlockbook, `/api/v2/utxo/${publicKey}`)
-            ).json();
+            const normalizeUTXOs = (raw) =>
+                raw.map((u) => ({
+                    txid: u.txid,
+                    vout: u.vout,
+                    value: u.value,
+                    confirmations: u.status.confirmed
+                        ? Math.max(0, this.blocks - u.status.block_height)
+                        : 0,
+                }));
 
-            // If using MPW's wallet, then sync the UTXOs in MPW's state
-            // This check is a temporary fix to the toggle explorer call
-            if (this === getNetwork())
-                if (!strAddress) {
-                    this.utxoFetched = true;
-                    getEventEmitter().emit('utxo', arrUTXOs);
+            const fetchUTXOsForAddr = async (addr) => {
+                const res = await retryWrapper(
+                    fetchElectrs,
+                    `/address/${addr}/utxo`
+                );
+                return normalizeUTXOs(await res.json());
+            };
+
+            let allUTXOs = [];
+
+            if (strAddress) {
+                allUTXOs = await fetchUTXOsForAddr(strAddress);
+            } else if (!this.wallet.isHD()) {
+                allUTXOs = await fetchUTXOsForAddr(
+                    this.wallet.getKeyToExport()
+                );
+            } else {
+                for (const chain of [0, 1]) {
+                    let gap = 0;
+                    let index = 0;
+                    while (gap < SCAN_GAP) {
+                        if (index > 0 && index % MAX_ACCOUNT_GAP === 0) {
+                            this.wallet.loadAddresses(chain);
+                        }
+                        const addr = this.wallet.getAddress(chain, index);
+                        const utxos = await fetchUTXOsForAddr(addr);
+                        allUTXOs.push(...utxos);
+                        gap = utxos.length > 0 ? 0 : gap + 1;
+                        index++;
+                    }
                 }
+            }
 
-            // Return the UTXOs for additional utility use
-            return arrUTXOs;
+            if (this === getNetwork() && !strAddress) {
+                this.utxoFetched = true;
+                getEventEmitter().emit('utxo', allUTXOs);
+            }
+
+            return allUTXOs;
         } catch (e) {
             console.error(e);
             this.error();
@@ -341,32 +317,20 @@ export class ExplorerNetwork extends Network {
         }
     }
 
-    /**
-     * Fetch an XPub's basic information
-     * @param {string} strXPUB - The xpub to fetch info for
-     * @returns {Promise<XPUBInfo>} - A JSON class of aggregated XPUB info
-     */
-    async getXPubInfo(strXPUB) {
-        return await (
-            await retryWrapper(fetchBlockbook, `/api/v2/xpub/${strXPUB}`)
-        ).json();
-    }
-
     async sendTransaction(hex) {
         try {
-            const data = await (
-                await retryWrapper(fetchBlockbook, '/api/v2/sendtx/', {
-                    method: 'post',
-                    body: hex,
-                })
-            ).json();
+            const res = await retryWrapper(fetchElectrs, '/tx', {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain' },
+                body: hex,
+            });
+            const txid = (await res.text()).trim();
 
-            // Throw and catch if the data is not a TXID
-            if (!data.result || data.result.length !== 64) throw data;
+            if (!txid || txid.length !== 64) throw new Error('Invalid txid: ' + txid);
 
-            console.log('Transaction sent! ' + data.result);
-            getEventEmitter().emit('transaction-sent', true, data.result);
-            return data.result;
+            console.log('Transaction sent! ' + txid);
+            getEventEmitter().emit('transaction-sent', true, txid);
+            return txid;
         } catch (e) {
             getEventEmitter().emit('transaction-sent', false, e);
             return false;
@@ -374,8 +338,12 @@ export class ExplorerNetwork extends Network {
     }
 
     async getTxInfo(txHash) {
-        const req = await retryWrapper(fetchBlockbook, `/api/v2/tx/${txHash}`);
-        return await req.json();
+        const req = await retryWrapper(fetchElectrs, `/tx/${txHash}`);
+        const tx = await req.json();
+        return {
+            ...tx,
+            blockHeight: tx.status.confirmed ? tx.status.block_height : -1,
+        };
     }
 
     // MEWC Foundation Analytics: if you are a user, you can disable this FULLY via the Settings.
@@ -415,7 +383,7 @@ let _network = null;
 
 /**
  * Sets the network in use by MPW.
- * @param {ExplorerNetwork} network - network to use
+ * @param {ElectrsNetwork} network - network to use
  */
 export function setNetwork(network) {
     _network = network;
@@ -423,24 +391,24 @@ export function setNetwork(network) {
 
 /**
  * Gets the network in use by MPW.
- * @returns {ExplorerNetwork?} Returns the network in use, may be null if MPW hasn't properly loaded yet.
+ * @returns {ElectrsNetwork?} Returns the network in use, may be null if MPW hasn't properly loaded yet.
  */
 export function getNetwork() {
     return _network;
 }
 
 /**
- * A Fetch wrapper which uses the current Blockbook Network's base URL
- * @param {string} api - The specific Blockbook api to call
+ * A Fetch wrapper which uses the current electrs Network's base URL
+ * @param {string} api - The specific electrs api to call
  * @param {RequestInit} options - The Fetch options
  * @returns {Promise<Response>} - The unresolved Fetch promise
  */
-export function fetchBlockbook(api, options) {
+export function fetchElectrs(api, options) {
     return fetch(_network.strUrl + api, options);
 }
 
 /**
- * A wrapper for Blockbook calls which can, in the event of an unresponsive explorer,
+ * A wrapper for electrs calls which can, in the event of an unresponsive explorer,
  * seamlessly attempt the same call on multiple other explorers until success.
  * @param {Function} func - The function to re-attempt with
  * @param  {...any} args - The arguments to pass to the function

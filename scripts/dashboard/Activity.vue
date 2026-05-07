@@ -24,7 +24,7 @@ const rewardsText = computed(
 );
 const rewardAmount = ref(0);
 const ticker = computed(() => cChainParams.current.TICKER);
-const explorerUrl = ref(getNetwork()?.strUrl);
+const explorerUrl = ref(cChainParams.current.blockExplorer);
 const txMap = computed(() => {
     return {
         [HistoricalTxType.STAKE]: {
@@ -67,7 +67,7 @@ async function update(txToAdd = 0) {
         return;
     }
 
-    explorerUrl.value = cNet?.strUrl;
+    explorerUrl.value = cChainParams.current.blockExplorer;
 
     // Prevent the user from spamming refreshes
     if (updating.value) return;

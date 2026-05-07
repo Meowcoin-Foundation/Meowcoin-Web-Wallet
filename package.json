@@ -71,7 +71,6 @@
         "@noble/hashes": "^1.1.5",
         "@noble/secp256k1": "^1.7.0",
         "@popperjs/core": "^2.11.6",
-        "mewc-promos": "^0.2.0",
         "base32": "^0.0.7",
         "bech32": "^2.0.0",
         "biginteger": "^1.0.3",

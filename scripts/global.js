@@ -145,36 +145,6 @@ export async function start() {
         domMnemonicModalPassphrase: document.getElementById(
             'ModalMnemonicPassphrase'
         ),
-        domRedeemTitle: document.getElementById('redeemCodeModalTitle'),
-        domRedeemCodeUse: document.getElementById('redeemCodeUse'),
-        domRedeemCodeCreate: document.getElementById('redeemCodeCreate'),
-        domRedeemCodeGiftIconBox: document.getElementById(
-            'redeemCodeGiftIconBox'
-        ),
-        domRedeemCodeGiftIcon: document.getElementById('redeemCodeGiftIcon'),
-        domRedeemCodeETA: document.getElementById('redeemCodeETA'),
-        domRedeemCodeProgress: document.getElementById('redeemCodeProgress'),
-        domRedeemCodeInputBox: document.getElementById('redeemCodeInputBox'),
-        domRedeemCodeInput: document.getElementById('redeemCodeInput'),
-        domRedeemCodeConfirmBtn: document.getElementById(
-            'redeemCodeModalConfirmButton'
-        ),
-        domRedeemCodeModeRedeemBtn: document.getElementById(
-            'redeemCodeModeRedeem'
-        ),
-        domRedeemCodeModeCreateBtn: document.getElementById(
-            'redeemCodeModeCreate'
-        ),
-        domRedeemCodeCreateInput: document.getElementById(
-            'redeemCodeCreateInput'
-        ),
-        domRedeemCodeCreateAmountInput: document.getElementById(
-            'redeemCodeCreateAmountInput'
-        ),
-        domRedeemCodeCreatePendingList: document.getElementById(
-            'redeemCodeCreatePendingList'
-        ),
-        domPromoTable: document.getElementById('promo-table'),
         domContactsTable: document.getElementById('contactsList'),
         domConfirmModalDialog: document.getElementById('confirmModalDialog'),
         domConfirmModalMain: document.getElementById('confirmModalMain'),
@@ -548,13 +518,8 @@ export function selectMaxBalance(domCoin, domValue, fCold = false) {
  * @param {string?} strAddress - Optional address to open, if void, the master key is used
  */
 export async function openExplorer(strAddress = '') {
-    if (wallet.isLoaded() && wallet.isHD() && !strAddress) {
-        const xpub = wallet.getXPub();
-        window.open(cExplorer.url + '/xpub/' + xpub, '_blank');
-    } else {
-        const address = strAddress || wallet.getAddress();
-        window.open(cExplorer.url + '/address/' + address, '_blank');
-    }
+    const address = strAddress || wallet.getCurrentAddress();
+    window.open(cChainParams.current.blockExplorer + '/address/' + address, '_blank');
 }
 
 async function loadImages() {

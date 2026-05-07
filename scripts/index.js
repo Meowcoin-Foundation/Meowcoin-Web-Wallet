@@ -48,14 +48,6 @@ export {
     createMasternode,
 } from './transactions.js';
 export {
-    promoConfirm,
-    setPromoMode,
-    sweepPromoCode,
-    deletePromoCode,
-    openPromoQRScanner,
-    promosToCSV,
-} from './promos.js';
-export {
     guiRenderContacts,
     guiAddContact,
     guiRemoveContact,

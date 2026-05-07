@@ -336,28 +336,28 @@ export class Mempool {
     parseTransaction(tx) {
         const vout = [];
         const vin = [];
-        for (const out of tx.vout) {
+        tx.vout.forEach((out, n) => {
             vout.push(
                 new CTxOut({
-                    outpoint: new COutpoint({ txid: tx.txid, n: out.n }),
-                    script: out.hex,
-                    value: parseInt(out.value),
+                    outpoint: new COutpoint({ txid: tx.txid, n }),
+                    script: out.scriptpubkey,
+                    value: out.value,
                 })
             );
-        }
+        });
         for (const inp of tx.vin) {
             const op = new COutpoint({
-                txid: inp.txid,
-                n: inp.vout ? inp.vout : 0,
+                txid: inp.is_coinbase ? undefined : inp.txid,
+                n: inp.is_coinbase ? 0 : inp.vout,
             });
-            vin.push(new CTxIn({ outpoint: op, scriptSig: inp.hex }));
+            vin.push(new CTxIn({ outpoint: op, scriptSig: inp.scriptsig }));
         }
         return new Transaction({
             txid: tx.txid,
-            blockHeight: tx.blockHeight,
+            blockHeight: tx.status.confirmed ? tx.status.block_height : -1,
             vin,
             vout,
-            blockTime: tx.blockTime,
+            blockTime: tx.status.block_time ?? 0,
         });
     }
     /**
