@@ -11,7 +11,7 @@ import {
 } from './global.js';
 import { wallet, hasEncryptedWallet } from './wallet.js';
 import { cChainParams } from './chain_params.js';
-import { setNetwork, ExplorerNetwork, getNetwork } from './network.js';
+import { setNetwork, ElectrsNetwork, getNetwork } from './network.js';
 import { confirmPopup, createAlert, isEmpty } from './misc.js';
 import {
     switchTranslation,
@@ -296,7 +296,7 @@ export async function setExplorer(explorer, fSilent = false) {
     cExplorer = explorer;
 
     // Enable networking + notify if allowed
-    const network = new ExplorerNetwork(cExplorer.url, wallet);
+    const network = new ElectrsNetwork(cExplorer.url, wallet);
     setNetwork(network);
 
     stakingDashboard.reset();
