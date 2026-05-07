@@ -35,6 +35,7 @@ export const cChainParams = reactive({
         BIP44_TYPE_LEDGER: 77,
         PROTOCOL_VERSION: 70030,
         MASTERNODE_PORT: 8788,
+        blockExplorer: 'https://explorer.mewccrypto.com',
         // A list of Labs-trusted explorers
         Explorers: [
             { name: 'MEWC Electrs 1', url: 'https://electrs.mewccrypto.com' },
@@ -72,6 +73,7 @@ export const cChainParams = reactive({
         BIP44_TYPE_LEDGER: 1,
         PROTOCOL_VERSION: 70030,
         MASTERNODE_PORT: 4969,
+        blockExplorer: 'https://explorer.mewccrypto.com',
         // A list of Labs-trusted explorers
         Explorers: [
             { name: 'MEWC Electrs 1', url: 'https://electrs.mewccrypto.com' },

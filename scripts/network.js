@@ -1,4 +1,7 @@
 import { cChainParams, MAX_ACCOUNT_GAP } from './chain_params.js';
+
+/** Scan gap used during address discovery — larger than MAX_ACCOUNT_GAP to match BIP44 recommendation */
+const SCAN_GAP = 50;
 import { createAlert } from './misc.js';
 import { getEventEmitter } from './event_bus.js';
 import {
@@ -155,8 +158,22 @@ export class ElectrsNetwork extends Network {
         }
 
         const fetchAddressTxs = async (addr) => {
-            const res = await retryWrapper(fetchElectrs, `/address/${addr}/txs`);
-            return res.json();
+            const first = await (await retryWrapper(fetchElectrs, `/address/${addr}/txs`)).json();
+            // electrs returns at most 25 confirmed txs per page; paginate if full
+            const confirmed = first.filter((tx) => tx.status.confirmed);
+            if (confirmed.length < 25) return first;
+            let all = [...first];
+            let lastTxid = confirmed.at(-1).txid;
+            while (true) {
+                const page = await (
+                    await retryWrapper(fetchElectrs, `/address/${addr}/txs/chain/${lastTxid}`)
+                ).json();
+                if (!page.length) break;
+                all = all.concat(page);
+                if (page.length < 25) break;
+                lastTxid = page.at(-1).txid;
+            }
+            return all;
         };
 
         if (!this.wallet.isHD()) {
@@ -166,10 +183,16 @@ export class ElectrsNetwork extends Network {
             }
         } else {
             for (const chain of [0, 1]) {
+                // Pre-load the first window so addresses are in #ownAddresses
                 this.wallet.loadAddresses(chain);
                 let gap = 0;
                 let index = 0;
-                while (gap < MAX_ACCOUNT_GAP) {
+                while (gap < SCAN_GAP) {
+                    // Keep the loaded address window ahead of the scanner so
+                    // wallet.isMyVout() can recognise any address we discover
+                    if (index > 0 && index % MAX_ACCOUNT_GAP === 0) {
+                        this.wallet.loadAddresses(chain);
+                    }
                     const addr = this.wallet.getAddress(chain, index);
                     const txs = await fetchAddressTxs(addr);
                     if (txs.length > 0) {
@@ -267,7 +290,10 @@ export class ElectrsNetwork extends Network {
                 for (const chain of [0, 1]) {
                     let gap = 0;
                     let index = 0;
-                    while (gap < MAX_ACCOUNT_GAP) {
+                    while (gap < SCAN_GAP) {
+                        if (index > 0 && index % MAX_ACCOUNT_GAP === 0) {
+                            this.wallet.loadAddresses(chain);
+                        }
                         const addr = this.wallet.getAddress(chain, index);
                         const utxos = await fetchUTXOsForAddr(addr);
                         allUTXOs.push(...utxos);

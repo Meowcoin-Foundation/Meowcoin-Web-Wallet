@@ -9,7 +9,6 @@ import {
     isSameType,
     isEmpty,
 } from './misc.js';
-import { PromoWallet } from './promos.js';
 import { ALERTS, translation } from './i18n.js';
 import { Account } from './accounts.js';
 import { COutpoint, CTxIn, CTxOut, Transaction } from './mempool.js';
@@ -85,28 +84,6 @@ export class Database {
             .transaction('txs', 'readwrite')
             .objectStore('txs');
         await store.delete(txid);
-    }
-
-    /**
-     * Add Promo Code to the database for tracking and management
-     * @param {PromoWallet} promo
-     */
-    async addPromo(promo) {
-        const store = this.#db
-            .transaction('promos', 'readwrite')
-            .objectStore('promos');
-        // The plaintext code is our key, since codes are unique and deterministic anyway
-        await store.put(promo, promo.code);
-    }
-    /**
-     * Removes a Promo Code from the Promo management system
-     * @param {string} promoCode - the promo code to remove
-     */
-    async removePromo(promoCode) {
-        const store = this.#db
-            .transaction('promos', 'readwrite')
-            .objectStore('promos');
-        await store.delete(promoCode);
     }
 
     /**
@@ -311,17 +288,6 @@ export class Database {
     }
 
     /**
-     * @returns {Promise<Array<PromoWallet>>} all Promo Codes stored in the db
-     */
-    async getAllPromos() {
-        const store = this.#db
-            .transaction('promos', 'readonly')
-            .objectStore('promos');
-        // Convert all promo objects in to their Class and return them as a new array
-        return (await store.getAll()).map((promo) => new PromoWallet(promo));
-    }
-
-    /**
      * Get all txs from the database
      * @returns {Promise<Transaction>}
      */
@@ -470,10 +436,6 @@ export class Database {
                     migrate = true;
                 }
 
-                // The introduction of MEWCPromos (safely added during <v2 upgrades)
-                if (oldVersion <= 1) {
-                    db.createObjectStore('promos');
-                }
                 if (oldVersion <= 2) {
                     db.createObjectStore('txs');
                 }
